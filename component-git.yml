@@ -1,0 +1,109 @@
+application:    
+  configuration:
+    configuration.dir:          ""
+    configuration.repo:         ""
+    configuration.branch:       "master"
+    configuration.runList:      "recipe[qubell-git]"
+    configuration.cookbooksUrl: "https://s3.amazonaws.com/qubell-starter-kit-artifacts/qubell-bazaar/component-git-cookbooks-stable-b9d691b.tar.gz"
+  interfaces:
+    configuration:
+      dir:          "bind(chef#input.dir)"
+      repo:         "bind(chef#input.repo)"
+      branch:       "bind(chef#input.branch)"
+      runList:      "bind(chef#input.runList)"
+      cookbooksUrl: "bind(chef#input.cookbooksUrl)"
+    output:
+      hash:         "bind(chef#result.hash)"
+    compute:
+      networks:     "bind(chef#compute.networks)"
+      exec:         "bind(chef#compute.exec)"
+  components:   
+    chef:
+      type: workflow.Instance
+      interfaces:
+        input:
+          dir:          configuration(string)
+          repo:         configuration(string)
+          branch:       configuration(string)
+          runList:      configuration(string)
+          cookbooksUrl: configuration(string)
+        result:
+          hash:         publish-signal(string)
+        compute:
+          networks:     consume-signal(map<string, map<string, string>>)
+          exec:         send-command(string command, int timeout => string stdOut, string stdErr => string stdOut, string stdErr, int exitCode)
+      required: [compute]
+      configuration:        
+        configuration.propagateStatus: [ launch ]
+        configuration.schedule:
+          pull: "0 0/1 * * * ? *" 
+        configuration.triggers: 
+          compute.networks: launch
+        configuration.workflows:
+          launch: &launch
+            steps:
+              install-chef:
+                  action: execrun
+                  parameters:
+                    interface: compute
+                    isSudo: true
+                    command: 
+                      - |
+                          bash <(curl -sL https://s3.amazonaws.com/qubell-starter-kit-artifacts/chef-install.sh) 11.14;
+                                    
+              init-cookbook:
+                action: execrun
+                precedingPhases: [ install-chef ]
+                parameters:
+                  interface: compute
+                  isSudo: true
+                  command: 
+                    - |
+                        wget {$.cookbooksUrl} -O /tmp/cookbooks.tar.gz &&
+                        mkdir -p /var/chef/cookbooks && 
+                        tar zxf /tmp/cookbooks.tar.gz -C /var/chef/ &&
+                        rm -rf /tmp/cookbooks.tar.gz;
+              
+              serialize:
+                action: serialize
+                precedingPhases: [ init-cookbook ]
+                parameters:
+                  format: YAML
+                  input: {
+                    "qubell-git": {
+                      "repo": "{$.repo}",
+                      "dir": "{$.dir}",
+                      "branch": "{$.branch}"
+                    }
+                  }
+                output:
+                  sd: serialized
+              
+              chefrun:
+                action: execrun
+                precedingPhases: [ serialize ]
+                parameters:
+                  interface: compute
+                  isSudo: true
+                  command: 
+                    - |
+                      echo '{$.sd}' | /opt/chef/embedded/bin/ruby -ryaml -rjson -e 'puts JSON.pretty_generate(YAML.load(ARGF))' < /dev/stdin | chef-solo -o '{$.runList}'  -j /dev/stdin
+                      
+              hash:
+                action: execrun
+                precedingPhases: [ chefrun ]
+                parameters:
+                  interface: compute
+                  isSudo: true
+                  command:
+                    - |
+                      cd {$.dir} &&
+                      echo `git log -n 1 --pretty='format:%H'`
+                output:
+                  hash: stdout
+            return:
+              hash:
+                value: "{$.hash[*][0]}"
+  
+          pull: *launch
+  

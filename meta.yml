@@ -1,0 +1,14 @@
+kit:
+  name: "Git"
+  link: https://github.com/qubell-bazaar/component-git
+  applications:
+    - name: "Git"
+      manifest: https://raw.github.com/qubell-bazaar/component-git/1.0-35p/component-git.yml
+  provider:
+    name: "Qubell"
+    link: http://qubell.com
+  documentation:
+    overview: |
+      This application requires the following items to be configured in your environment:
+        * CloudServers account;
+      Please refer to the Getting Started for step-by-step instructions on how to configure your environment.
